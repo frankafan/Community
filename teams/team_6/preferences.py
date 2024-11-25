@@ -17,10 +17,6 @@ def phaseIpreferences(player, community, global_random):
     list_choices.append([0, min(partner_id + 1, num_members - 1)])
     return list_choices
 
-<<<<<<< Updated upstream
-
-=======
->>>>>>> Stashed changes
 def phaseIIpreferences(player, community, global_random):
     """
     Return a list of tasks for the particular player to do individually.
@@ -32,23 +28,22 @@ def phaseIIpreferences(player, community, global_random):
         return bids
 
     try:
-        energy_threshold = 0
+        wait_energy_threshold = 0
         player_index = community.members.index(player)
-<<<<<<< Updated upstream
-        assignments, total_cost = optimal_assignment(community.tasks, community.members)
-=======
         assignments, total_cost, sacrifices = assign_with_sacrifices(community, community.tasks)
 
         if player in sacrifices:
+            # If the player is sacrificed, they cannot perform tasks
             return []
->>>>>>> Stashed changes
 
         best_task = assignments.get(player_index)
         if best_task is None:
             return []
 
-        best_task_cost = get_energy_cost(community.tasks[best_task], player.abilities)
-        if player.energy - best_task_cost < energy_threshold:
+        best_task_cost = loss_phase2(
+            community.tasks[best_task], player.abilities, player.energy
+        )
+        if player.energy - best_task_cost < wait_energy_threshold:
             return []
 
         return [best_task]
@@ -56,10 +51,6 @@ def phaseIIpreferences(player, community, global_random):
         print(e)
         return bids
 
-<<<<<<< Updated upstream
-
-def optimal_assignment(tasks, members, energy_threshold=0):
-=======
 def assign_phase1(tasks, members):
     num_tasks = len(tasks)
     num_members = len(members)
@@ -115,9 +106,83 @@ def assign_phase1(tasks, members):
 
     return assignments, total_cost
 
+def assign_with_sacrifices(community, tasks):
+    """
+    Assign tasks, but allow for sacrifices if all tasks cannot be completed
+    without dropping some players below -10 energy.
+    Sacrifices are iteratively tested, starting with the weakest player.
+    """
+    try:
+        # Step 1: Attempt initial assignment
+        assignments, total_cost = assign_phase2(tasks, community.members)
+
+        # Check if all assignments are feasible (no energy drops below -10)
+        if is_assignment_feasible(assignments, community, tasks):
+            return assignments, total_cost, []
+
+        # Step 2: Iterative Sacrifice
+        sacrifices = []
+        remaining_members = community.members[:]
+        
+        while remaining_members:
+            # Determine the weakest player to sacrifice
+            weakest_player = determine_weakest_player(remaining_members)
+            sacrifices.append(weakest_player)
+            remaining_members.remove(weakest_player)
+
+            # Reassign tasks with the remaining players
+            assignments, total_cost = assign_phase2(tasks, remaining_members)
+
+            # Check if the new assignment is feasible
+            if is_assignment_feasible(assignments, community, tasks, sacrifices):
+                return assignments, total_cost, sacrifices
+
+        # If no feasible assignment is found, return with all players sacrificed
+        return {}, float("inf"), sacrifices
+
+    except Exception as e:
+        print(f"Error during assignment with sacrifices: {e}")
+        return {}, float("inf"), []
+
+def is_assignment_feasible(assignments, community, tasks, sacrifices=None):
+    """
+    Check if the current assignment is feasible (no player drops below -10 energy).
+    """
+    sacrifices = sacrifices or []
+    for player_index, task_index in assignments.items():
+        player = community.members[player_index]
+        if player in sacrifices:
+            continue  # Ignore sacrificed players
+        task = tasks[task_index]
+        task_cost = loss_phase2(task, player.abilities, player.energy)
+        if player.energy - task_cost < -10:
+            return False
+    return True
+
+
+def determine_weakest_player(members):
+    """
+    Determine the weakest player in the given list of members.
+    Weakness is based on abilities and proximity to the -10 energy threshold.
+    """
+    weakest_player = None
+    max_weakness_score = float("-inf")
+    for player in members:
+        # Weakness score calculation
+        weakness_score = (
+            sum(player.abilities) * -1  # Higher abilities reduce weakness
+            + (10 + player.energy) * 2  # Closer to -10 increases weakness
+        )
+        if weakness_score > max_weakness_score:
+            max_weakness_score = weakness_score
+            weakest_player = player
+    return weakest_player
+
 
 def assign_phase2(tasks, members):
->>>>>>> Stashed changes
+    """
+    Assign tasks to members using the Hungarian Algorithm.
+    """
     num_tasks = len(tasks)
     num_members = len(members)
 
@@ -125,24 +190,17 @@ def assign_phase2(tasks, members):
 
     for i, task in enumerate(tasks):
         for j, member in enumerate(members):
-            cost_matrix[i][j] = get_energy_cost(task, member.abilities)
-            if member.energy - cost_matrix[i][j] < energy_threshold:
-                cost_matrix[i][j] += 1e6
+            cost_matrix[i][j] = loss_phase2(task, member.abilities, member.energy)
 
     row_indices, col_indices = linear_sum_assignment(cost_matrix)
 
-    assignments = {player: task for task, player in zip(row_indices, col_indices)}
+    assignments = {col_indices[i]: row_indices[i] for i in range(len(row_indices))}
     total_cost = sum(
         cost_matrix[row_indices[i], col_indices[i]] for i in range(len(row_indices))
     )
 
     return assignments, total_cost
 
-<<<<<<< Updated upstream
-
-def get_energy_cost(task, abilities):
-    return sum([max(task[k] - abilities[k], 0) for k in range(len(abilities))])
-=======
 def loss_phase1(task, player1, player2):
     cost = sum(
         max(task[k] - max(player1.abilities[k], player2.abilities[k]), 0)
@@ -160,70 +218,9 @@ def loss_phase1(task, player1, player2):
 
 
 def loss_phase2(task, abilities, current_energy):
+    """
+    Calculate the cost of a player performing a task, factoring in abilities and energy.
+    """
     cost = sum([max(task[k] - abilities[k], 0) for k in range(len(abilities))])
     cost += max(0, cost - current_energy)
     return cost
-
-def assign_with_sacrifices(community, tasks):
-    """
-    Assign tasks, but allow for sacrifices if all tasks cannot be completed
-    without dropping some players below -10 energy.
-    Sacrifices are iteratively tested, starting with the weakest player.
-    """
-    try:
-        assignments, total_cost = assign_phase2(tasks, community.members)
-
-        if is_assignment_feasible(assignments, community, tasks):
-            return assignments, total_cost, []
-
-        sacrifices = []
-        remaining_members = community.members[:]
-        
-        while remaining_members:
-            weakest_player = determine_weakest_player(remaining_members)
-            sacrifices.append(weakest_player)
-            remaining_members.remove(weakest_player)
-
-            assignments, total_cost = assign_phase2(tasks, remaining_members)
-
-            if is_assignment_feasible(assignments, community, tasks, sacrifices):
-                return assignments, total_cost, sacrifices
-
-        return {}, float("inf"), sacrifices
-
-    except Exception as e:
-        print(f"Error during assignment with sacrifices: {e}")
-        return {}, float("inf"), []
-    
-def is_assignment_feasible(assignments, community, tasks, sacrifices=None):
-    """
-    Check if the current assignment is feasible (no player drops below -10 energy).
-    """
-    sacrifices = sacrifices or []
-    for player_index, task_index in assignments.items():
-        player = community.members[player_index]
-        if player in sacrifices:
-            continue
-        task = tasks[task_index]
-        task_cost = loss_phase2(task, player.abilities, player.energy)
-        if player.energy - task_cost < -10:
-            return False
-    return True
-
-def determine_weakest_player(members):
-    """
-    Determine the weakest player in the given list of members.
-    Weakness is based on abilities and proximity to the -10 energy threshold.
-    """
-    weakest_player = None
-    max_weakness_score = float("-inf")
-    for player in members:
-        weakness_score = (
-            sum(player.abilities) * -1
-            + (10 + player.energy) * 2
-        )
-        if weakness_score > max_weakness_score:
-            max_weakness_score = weakness_score
-            weakest_player = player
-    return weakest_player
->>>>>>> Stashed changes
